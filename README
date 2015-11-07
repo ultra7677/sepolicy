@@ -1,120 +1,70 @@
-Policy Generation:
+sepolicy是SEAndroid的源码
+***
+SEAndroid ：全称Security Enhancements for Android，以SELinux为核心  
 
-Additional, per device, policy files can be added into the
-policy build.
+SELinux ：是美国国家安全局搞的一个Modules，是开源的，后来Google将其应用到自家的Android平台上来  
 
-They can be configured through the use of three variables,
-they are:
-1. BOARD_SEPOLICY_REPLACE
-2. BOARD_SEPOLICY_UNION
-3. BOARD_SEPOLICY_DIRS
-4. BOARD_SEPOLICY_IGNORE
+DAC : (Discretionary Access Control )  在SELinux出现之前，Linux系统所用的安全模型。在这个模型里面，进程所拥有的权限与执行它的用户权限相同，
 
-The variables should be set in the BoardConfig.mk file in
-the device or vendor directories.
+MAC : (Mandatory Access Control)
+SELinux的安全模型，进程所拥有的权限，都必须在安全配置文件（.te）里面定义。这个进程只有在配置文件中定义的权限。
 
-BOARD_SEPOLICY_UNION is a list of files that will be
-"unioned", IE concatenated, at the END of their respective
-file in external/sepolicy. Note, to add a unique file you
-would use this variable.
+Flask : MAC的大概架构  
+flask定义了    
 
-BOARD_SEPOLICY_REPLACE is a list of files that will be
-used instead of the corresponding file in external/sepolicy.
+* Subject : process  进程,被称之为客体  
 
-BOARD_SEPOLICY_DIRS contains a list of directories to search
-for BOARD_SEPOLICY_UNION and BOARD_SEPOLICY_REPLACE files. Order
-matters in this list.
-eg.) If you have BOARD_SEPOLICY_UNION := widget.te and have 2
-instances of widget.te files on BOARD_SEPOLICY_DIRS search path.
-The first one found (at the first search dir containing the file)
-gets processed first.
-Reviewing out/target/product/<device>/etc/sepolicy_intermediates/policy.conf
-will help sort out ordering issues.
+* Object: file, socket, IPC object… 对象，是客体访问的对象  
 
-It is an error to specify a BOARD_POLICY_REPLACE file that does
-not exist in external/sepolicy.
+* Security Context : 安全信息，是一个字符串，用来表示subject或object的安全属性  
 
-It is an error to specify a BOARD_POLICY_REPLACE file that appears
-multiple times on the policy search path defined by BOARD_SEPOLICY_DIRS.
-eg.) if you specify shell.te in BOARD_SEPOLICY_REPLACE and
-BOARD_SEPOLICY_DIRS is set to
-"vendor/widget/common/sepolicy device/widget/x/sepolicy" and shell.te
-appears in both locations, it is an error. Unless it is in
-BOARD_SEPOLICY_IGNORE to be filtered out. See BOARD_SEPOLICY_IGNORE
-for more details.
+* Security Identifiers (SID) : 用来map到Security context的一个东西  
 
-It is an error to specify the same file name in both
-BOARD_POLICY_REPLACE and BOARD_POLICY_UNION.
+* Security Model : 是Type Enforcement (TE), Identity-Based Access Control (IBAC), RBAC, 与 optional MLS的结合，
+其中重点内容是TE。
 
-It is an error to specify a BOARD_SEPOLICY_DIRS that has no entries when
-specifying BOARD_SEPOLICY_REPLACE.
+***
+下面说的文件都在/sepolicy 下面
 
-BOARD_SEPOLICY_IGNORE is a list of paths (directory + filename) of
-files that are not to be included in the resulting policy. This list
-is passed to filter-out to remove any paths you may want to ignore. This
-is useful if you have numerous config directories that contain a file
-and you want to NOT include a particular file in your resulting
-policy file, either by UNION or REPLACE.
-Eg.) Suppose the following:
-     BOARD_SEPOLICY_DIRS := X Y
-     BOARD_SEPOLICY_REPLACE := A
-     BOARD_SEPOLICY_IGNORE := X/A
+TE: 
+定义domain对object的权限  
 
-     Directories X and Y contain A.
+完整的格式如下  
+> rule_name source_type target_type : class perm_set  
+Type -> processes & object  
 
-     The resulting policy is created by using Y/A only, thus X/A was
-     ignored.
+举个例子，在untrusted app 里面，我们可以在最后找到两行。  
 
-Example BoardConfig.mk Usage:
-From the Tuna device BoardConfig.mk, device/samsung/tuna/BoardConfig.mk
+> allow untrusted_app shell_data_file:file rw_file_perms;
+  allow untrusted_app shell_data_file:dir r_dir_perms;  
+  这两行允许 untrusted_app 进程，对shell_data_file 下面的文件进行读和写  
+  以及读shell_data_file 目录的权限  
 
-BOARD_SEPOLICY_DIRS := \
-        device/samsung/tuna/sepolicy
+  其中untrusted_app的定义是非系统app  
+  shell_data_file的定义可以在file_contexts文件夹里面找到  
+> " /data/local/tmp(/.*)?	u:object_r:shell_data_file:s0  "  
+  
+  这行整体来看叫做security labeling,右边是security context，左边是这个context与什么文件路径链接起来。  
+  然后详细说一下security context的构成部分。  
+  最左边的u表示user,在users里面定义。  
+  object_r是roles，在SEAndroid里面，一个user可以属于不同的roles。  
+  最后的s0是security level,SEAndroid里面给系统资源都分配了一个security level,只有有对应的security level的进程才能访问这些资源。  
 
-BOARD_SEPOLICY_UNION := \
-        genfs_contexts \
-        file_contexts \
-        sepolicy.te
+知道了这些内容，我们差不多就可以根据实际情况添加对应的security policy了。
+比如untrusted_app是不能在自己的目录下面创造文件夹和文件的。
+如果在untrusted.te加上这两行之后：  
+>
+Allow untrusted_app shell_data_file:file create_file_perms  
+Allow untrusted_app shell_data_file:dir create_dir_perms  
 
-SPECIFIC POLICY FILE INFORMATION
+untrusted_app就有了在/data/local/tmp里面创建文件和文件夹的权限。  
 
-mac_permissions.xml:
-  ABOUT:
-    The mac_permissions.xml file is used for controlling the mmac solutions
-    as well as mapping a public base16 signing key with an arbitrary seinfo
-    string. Details of the files contents can be found in a comment at the
-    top of that file. The seinfo string, previously mentioned, is the same string
-    that is referenced in seapp_contexts.
 
-    This file can be replaced through BOARD_SEPOLICY_REPLACE containing the
-    value "mac_permissions.xml", or appended to by using the BOARD_SEPOLICY_UNION
-    variable. It is important to note the final processed version of this file
-    is stripped of comments and whitespace. This is to preserve space on the
-    system.img. If one wishes to view it in a more human friendly format,
-    the "tidy" or "xmllint" command will assist you.
 
-  TOOLING:
-    insertkeys.py
-      Is a helper script for mapping arbitrary tags in the signature stanzas of
-      mac_permissions.xml to public keys found in pem files. This script takes
-      a mac_permissions.xml file(s) and configuration file in order to operate.
-      Details of the configuration file (keys.conf) can be found in the subsection
-      keys.conf. This tool is also responsible for stripping the comments and
-      whitespace during processing.
 
-      keys.conf
-        The keys.conf file is used for controlling the mapping of "tags" found in
-        the mac_permissions.xml signature stanzas with actual public keys found in
-        pem files. The configuration file can be used in BOARD_SEPOLICY_UNION and
-        BOARD_SEPOLICY_REPLACE variables and is processed via m4.
 
-        The script allows for mapping any string contained in TARGET_BUILD_VARIANT
-        with specific path to a pem file. Typically TARGET_BUILD_VARIANT is either
-        user, eng or userdebug. Additionally, one can specify "ALL" to map a path to
-        any string specified in TARGET_BUILD_VARIANT. All tags are matched verbatim
-        and all options are matched lowercase. The options are "tolowered" automatically
-        for the user, it is convention to specify tags and options in all uppercase
-        and tags start with @.
 
-        NOTE: The pem files are base64 encoded and PackageManagerService, mac_permissions.xml
-              and setool all use base16 encodings.
+
+
+
+
